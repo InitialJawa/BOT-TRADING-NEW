@@ -49,12 +49,15 @@ This uses **4-bar momentum** (not 1-bar). In uptrend, any bar that hasn't droppe
 | Max spread | 300 points | 300 points |
 | Mode | Instant | Instant |
 
-## Lot Sizing ($300 capital, 2% risk/trade)
-| Pair | Lot | $/point |
-|------|-----|---------|
-| XAUUSDm | 0.03 | $3.00 |
-| US30m | 0.20 | $0.20 |
-| JP225m | 5.0 | ¥0.031 (≈$0.0002) |
+## Lot Sizing ($300 capital, 5% risk/trade)
+| Pair | Lot | Risk/trade | $/point |
+|------|-----|-----------|---------|
+| XAUUSDm | **0.06** | $15.51 | $6.00 |
+| US30m | **0.64** | $15.05 | $0.64 |
+| JP225m | **45.75** | $15.00 | $0.285 |
+
+**Note:** Risk = SL(pts) × $/pt × lot. SL = 0.3 × ATR.
+For $8,825 live balance, multiply lots by 29.4× for same 5% risk percentage.
 
 ## Backtest Results (Corrected Logic)
 
@@ -167,11 +170,27 @@ Bot berjalan dengan **config lama (v1.x)** di PC live. Config baru (ADAPTIVE) be
 ## Current Configuration (v2.1)
 File: `bot_live/config.yaml`
 - All 3 pairs use `ADAPTIVE` strategy
-- Lot sizes: XAUUSD 0.03, US30 0.20, JP225 5.0
+- Lot sizes: XAUUSD **0.06**, US30 **0.64**, JP225 **45.75** (5% risk/trade)
 - Mode: instant (with ADAPTIVE re-entry in trending mode only)
 - Regime threshold: **0.7** ATR (dinaikkan dari 0.5 — lebih selektif)
 - Session filter: XAUUSD 07:00-22:00 UTC, US30 13:30-20:00 UTC, JP225 00:00-08:00 UTC
 - Cooldown: skip entry after 3 consecutive losses (reset on win)
+
+## 5% Risk Backtest Results (v2.1, th=0.7)
+
+```
+Pair        Lot   Trades  WR%    PF     Adj$     MaxDD    /bln
+XAUUSD     0.06    28    42.9%  1.28  +$25.08   8.0%    $3.14
+US30       0.64    30    50.0%  1.78  +$60.47   8.6%    $7.56
+JP225     45.75    21    47.6%  1.58  +$13.79   3.8%    $1.72
+───────────────────────────────────────────────────────────────
+TOTAL                    79           +$99.34          $12.42/mo
+```
+
+Return **$12.42/bln (4.1% ROI/bln)** with max DD **8.6%** ($25.80 on $300).
+Circuit breaker at 15% — masih ada 6.4% buffer.
+
+---
 
 ## Threshold Decision (0.5 vs 0.7) — v2.1 Exact Logic
 

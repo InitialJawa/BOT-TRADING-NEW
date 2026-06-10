@@ -5,7 +5,7 @@
 symbols:
   - name: "XAUUSDm"
     strategy_type: "ADAPTIVE"
-    lot_size: 0.03
+    lot_size: 0.06       # 5% risk/trade ($15 on $300 cap)
     magic_number: 25062026
     comment: "SCALP_XAU"
     max_spread_points: 300
@@ -17,7 +17,7 @@ symbols:
 
   - name: "US30m"
     strategy_type: "ADAPTIVE"
-    lot_size: 0.20
+    lot_size: 0.64       # 5% risk/trade ($15 on $300 cap)
     magic_number: 25062027
     comment: "SCALP_US30"
     max_spread_points: 300
@@ -29,7 +29,7 @@ symbols:
 
   - name: "JP225m"
     strategy_type: "ADAPTIVE"
-    lot_size: 5.0
+    lot_size: 45.75      # 5% risk/trade ($15 on $300 cap)
     magic_number: 25062028
     comment: "SCALP_JP225"
     max_spread_points: 300
