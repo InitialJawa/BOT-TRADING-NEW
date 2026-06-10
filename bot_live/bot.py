@@ -303,8 +303,8 @@ class ScalpingBot:
             handler.update_trailing(position)
             return
 
-        # TREND_RE: re-enter immediately when no position
-        if handler.strategy_type == "TREND_RE":
+        # Re-entry strategies (TREND_RE / ADAPTIVE): re-enter immediately when no position
+        if handler.strategy.is_reentry_strategy:
             signal = handler.strategy.get_trend_signal()
             if signal:
                 handler.place_order(signal)
@@ -323,8 +323,10 @@ class ScalpingBot:
         logger.info("=" * 50)
         logger.info("BOT STARTING")
         logger.info(f"Symbols: {names}")
+        regime_th = self.shared_strategy.get('regime_threshold', 'N/A')
         logger.info(f"Strategy: EMA {self.shared_strategy['ema_fast']}/{self.shared_strategy['ema_slow']}")
         logger.info(f"SL/TP: {self.shared_strategy['sl_atr_mult']}/{self.shared_strategy['tp_atr_mult']} ATR")
+        logger.info(f"Regime threshold: {regime_th}")
         logger.info(f"Mode: {self.mode}")
         logger.info("=" * 50)
 

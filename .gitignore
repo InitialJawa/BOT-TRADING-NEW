@@ -5,3 +5,7 @@ logs/
 state_*.json
 trades.csv
 .env
+_*.py
+__*.py
+simulasi_*.py
+cek_*.py

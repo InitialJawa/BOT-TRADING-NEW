@@ -1,5 +1,5 @@
 """
-Strategy Engine — Multi-Strategy: EMA_CROSS / MOMENTUM / PULLBACK / TREND_RE
+Strategy Engine — Multi-Strategy: EMA_CROSS / MOMENTUM / PULLBACK / TREND_RE / ADAPTIVE
 ATR-based SL/TP + trailing for all strategies
 """
 import pandas as pd
@@ -7,7 +7,7 @@ import MetaTrader5 as mt5
 
 TF_MAP = {"M1": mt5.TIMEFRAME_M1, "M5": mt5.TIMEFRAME_M5}
 
-VALID_STRATEGIES = {"EMA_CROSS", "MOMENTUM", "PULLBACK", "TREND_RE"}
+VALID_STRATEGIES = {"EMA_CROSS", "MOMENTUM", "PULLBACK", "TREND_RE", "ADAPTIVE"}
 
 
 class ScalpingStrategy:
@@ -20,6 +20,7 @@ class ScalpingStrategy:
         self.tp_atr_mult = s["tp_atr_mult"]
         self.trail_activation = s["trailing_activation"]
         self.mom_threshold = s.get("momentum_threshold", 0.0005)
+        self.regime_threshold = s.get("regime_threshold", 0.5)
 
         self.max_spread = config["max_spread_points"]
         self.symbol = config["symbol"]
@@ -139,6 +140,54 @@ class ScalpingStrategy:
         side = "buy" if trend_up else "sell"
         return self._build_signal(side, curr["close"], curr["atr"], curr.name)
 
+    def _detect_regime(self, df):
+        """Detect market regime: 'ranging' or 'trending' based on EMA spread vs ATR"""
+        if len(df) < 3:
+            return "ranging"
+        curr = df.iloc[-1]
+        ema_spread = abs(curr["ema_fast"] - curr["ema_slow"])
+        atr_val = curr["atr"]
+        if atr_val == 0:
+            return "ranging"
+        ratio = ema_spread / atr_val
+        return "trending" if ratio >= self.regime_threshold else "ranging"
+
+    def _sig_adaptive(self, df):
+        """Adaptive multi-strategy:
+        - Ranging market: EMA crossover (catches reversals)
+        - Trending market: TREND_RE + momentum confirmation (rides trend)
+        """
+        if len(df) < 4:
+            return None
+        regime = self._detect_regime(df)
+        curr = df.iloc[-1]
+
+        if regime == "ranging":
+            sig = self._sig_ema_cross(df)
+            if sig:
+                sig["regime"] = "ranging"
+            return sig
+        else:
+            trend_up = self._is_trend_up(df)
+            trend_down = self._is_trend_down(df)
+            if not trend_up and not trend_down:
+                return None
+            mom = curr["close"] / df.iloc[-4]["close"] - 1
+            if trend_up and mom > -self.mom_threshold:
+                sig = self._build_signal("buy", curr["close"], curr["atr"], curr.name)
+                sig["regime"] = "trending"
+                return sig
+            if trend_down and mom < self.mom_threshold:
+                sig = self._build_signal("sell", curr["close"], curr["atr"], curr.name)
+                sig["regime"] = "trending"
+                return sig
+            return None
+
+    @property
+    def is_reentry_strategy(self):
+        """TREND_RE and ADAPTIVE support re-entry after SL"""
+        return self.strategy_type in ("TREND_RE", "ADAPTIVE")
+
     # ---- public API ----
 
     def get_signal(self):
@@ -162,10 +211,12 @@ class ScalpingStrategy:
             return self._sig_pullback(df)
         elif self.strategy_type == "TREND_RE":
             return self._sig_trend_re(df)
+        elif self.strategy_type == "ADAPTIVE":
+            return self._sig_adaptive(df)
         return None
 
     def get_trend_signal(self):
-        """Quick trend-direction entry (for TREND_RE between candles)."""
+        """Quick trend-direction entry (for TREND_RE / ADAPTIVE re-entry)."""
         rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 10)
         if rates is None or len(rates) < 5:
             return None
@@ -175,6 +226,20 @@ class ScalpingStrategy:
         curr = df.iloc[-1]
         spread = curr.get("spread", 0)
         if spread > self.max_spread:
+            return None
+        if self.strategy_type == "ADAPTIVE":
+            regime = self._detect_regime(df)
+            if regime != "trending":
+                return None
+            mom = curr["close"] / df.iloc[-4]["close"] - 1
+            if self._is_trend_up(df) and mom > -self.mom_threshold:
+                sig = self._build_signal("buy", curr["close"], curr["atr"], curr.name)
+                sig["regime"] = "trending"
+                return sig
+            if self._is_trend_down(df) and mom < self.mom_threshold:
+                sig = self._build_signal("sell", curr["close"], curr["atr"], curr.name)
+                sig["regime"] = "trending"
+                return sig
             return None
         if self._is_trend_up(df):
             return self._build_signal("buy", curr["close"], curr["atr"], curr.name)
