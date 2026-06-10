@@ -1,14 +1,21 @@
 # ============================================================
-# Live Bot Configuration — Scalping Bot XAUUSD M5
+# Live Bot Configuration — Multi-Symbol Scalping
 # ============================================================
 
-symbol: "XAUUSDm"
-timeframe: "M5"          # M1, M5, M15
-magic_number: 25062026   # Unique ID untuk order bot
-comment: "SCALP_BOT"
+symbols:
+  - name: "XAUUSDm"
+    lot_size: 0.01
+    magic_number: 25062026
+    comment: "SCALP_XAU"
+    max_spread_points: 300
 
-lot_size: 0.01
-max_spread_points: 300   # Skip entry jika spread > 300
+  - name: "US30m"
+    lot_size: 0.01
+    magic_number: 25062027
+    comment: "SCALP_US30"
+    max_spread_points: 300
+
+timeframe: "M5"
 
 # ---- Strategy Parameters (optimized) ----
 strategy:
@@ -23,12 +30,12 @@ strategy:
 risk:
   max_daily_loss_pct: 5.0
   max_consecutive_losses: 5
-  max_positions: 1        # Hanya 1 posisi aktif per symbol
+  max_positions: 1
   circuit_breaker_dd_pct: 15.0
 
 # ---- Mode ----
-mode: "instant"           # "candle" = entry di candle baru, "instant" = entry langsung jika ada sinyal
-test_mode: false           # true = place 1 test BUY on startup, false = normal trading
+mode: "instant"
+test_mode: false
 
 # ---- Polling ----
-poll_interval_seconds: 5  # Cek tiap 5 detik
+poll_interval_seconds: 5
