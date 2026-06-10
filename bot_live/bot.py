@@ -32,6 +32,7 @@ class SymbolHandler:
             "magic_number": self.magic,
             "comment": self.comment,
             "max_spread_points": cfg.get("max_spread_points", 300),
+            "session_filter": cfg.get("session_filter", {}),
             "timeframe": self.timeframe_str,
             "strategy_type": self.strategy_type,
             "strategy": shared_strategy,
@@ -42,6 +43,7 @@ class SymbolHandler:
             "last_candle_time": None,
             "daily_pnl": 0.0,
             "consecutive_losses": 0,
+            "cooldown_cleared": True,
             "last_date": None,
             "circuit_breaked": False,
             "session_trades": 0,
@@ -229,8 +231,10 @@ class ScalpingBot:
 
             if pnl <= 0:
                 handler.state["consecutive_losses"] += 1
+                handler.state["cooldown_cleared"] = False
             else:
                 handler.state["consecutive_losses"] = 0
+                handler.state["cooldown_cleared"] = True
             handler.state["daily_pnl"] += pnl
             handler.save_state()
 
@@ -296,6 +300,10 @@ class ScalpingBot:
             max_loss = self.risk.get("max_daily_loss_pct", 5) / 100 * account["balance"]
             if handler.state["daily_pnl"] <= -max_loss:
                 return
+
+        # Cooldown: skip entry if 3+ consecutive losses without a win
+        if handler.state["consecutive_losses"] >= 3 and not handler.state.get("cooldown_cleared", False):
+            return
 
         # Manage open position
         position = handler.get_position()

@@ -110,16 +110,49 @@ TREND_RE     +$49.07     +$5.21      +$7.14     ✅ 2/3 pos
 
 5. **Daily loss circuit (5%) & max consecutive losses (5)** protect against drawdown: max DD across all strategies < 7%.
 
-## Current Configuration
+6. **Price-vs-EMA filter** (`_sig_trend_re`): hanya entry jika `price > EMA_fast` untuk BUY atau `price < EMA_fast` untuk SELL. Mencegah entry saat harga sudah terlalu jauh dari EMA (late entry).
+
+7. **Session filter**: XAUUSD terbatas London+NY session (07:00-22:00 UTC) — hipotesis: Asian session terlalu choppy (belum dibuktikan, perlu backtest setelah data terkumpul).
+
+8. **Cooldown 3 loss**: skip entry setelah 3 loss berturut-turut, reset otomatis saat WIN. Berbeda dari circuit breaker yang stop total.
+
+## Incident Log — June 2026
+
+Bot berjalan dengan **config lama (v1.x)** di PC live. Config baru (ADAPTIVE) belum di-deploy.
+
+| Masalah | Dampak |
+|---------|--------|
+| XAUUSDm: TREND_RE + lot 0.10 (bukan 0.03) | Risk 3.3x lebih besar, strategy salah |
+| Tidak ada session filter | Trade masuk di Asian session (choppy) |
+| regime_threshold 0.5 (terlalu sensitif) | Terlalu sering masuk TRENDING mode |
+
+**Live 30 hari:** 208 trades, 43% WR, **-$1,174.67** (XAUUSD: 25% WR, -$1,156)
+
+---
+
+## Current Configuration (v2.1)
 File: `bot_live/config.yaml`
 - All 3 pairs use `ADAPTIVE` strategy
 - Lot sizes: XAUUSD 0.03, US30 0.20, JP225 5.0
 - Mode: instant (with ADAPTIVE re-entry in trending mode only)
-- Regime threshold: 0.5 ATR
+- Regime threshold: **0.7** ATR (dinaikkan dari 0.5 — lebih selektif)
+- Session filter: XAUUSD 07:00-22:00 UTC, US30 13:30-20:00 UTC, JP225 00:00-08:00 UTC
+- Cooldown: skip entry after 3 consecutive losses (reset on win)
 
-## File Changes Made
+## Threshold Decision (0.5 vs 0.7)
+
+Backtest ADAPTIVE across all 3 pairs (full period):
+
+| Threshold | XAUUSD | US30 | JP225 | **Total** | Trades |
+|-----------|--------|------|-------|-----------|--------|
+| 0.5 | +$65.97 | +$18.92 | +$17.92 | **+$102.81** | 251 |
+| 0.7 | +$66.51 | +$21.63 | +$14.73 | **+$102.87** | 230 |
+
+Virtually identical total return. 0.7 chosen for **fewer trades** (lower transaction costs) and **better US30 P3 performance**.
+
+## File Changes (v2.1)
 | File | Change |
 |------|--------|
-| `bot_live/strategy.py` | Added `_detect_regime()` (ranging/trending), `_sig_adaptive()` (EMA_CROSS in ranging, TREND_RE+momentum in trending), `is_reentry_strategy` property |
-| `bot_live/bot.py` | `_tick_handler` uses `handler.strategy.is_reentry_strategy` instead of hardcoded `"TREND_RE"` check |
-| `bot_live/config.yaml` | Changed all symbols to `ADAPTIVE` strategy, added `regime_threshold: 0.5` |
+| `bot_live/strategy.py` | Added `_is_within_session()`, price-vs-EMA filter in `_sig_trend_re()`, session filter check in `get_signal()` + `get_trend_signal()` |
+| `bot_live/bot.py` | Added `cooldown_cleared` state tracking, cooldown check in `_tick_handler` (skip entry after 3 consecutive losses until win), session_filter passthrough in handler config |
+| `bot_live/config.yaml` | Added `session_filter` per symbol (XAU/US30/JP225), changed `regime_threshold: 0.5 → 0.7` |

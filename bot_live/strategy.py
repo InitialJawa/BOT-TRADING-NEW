@@ -4,6 +4,7 @@ ATR-based SL/TP + trailing for all strategies
 """
 import pandas as pd
 import MetaTrader5 as mt5
+from datetime import datetime, timezone, time as dtime
 
 TF_MAP = {"M1": mt5.TIMEFRAME_M1, "M5": mt5.TIMEFRAME_M5}
 
@@ -23,6 +24,7 @@ class ScalpingStrategy:
         self.regime_threshold = s.get("regime_threshold", 0.5)
 
         self.max_spread = config["max_spread_points"]
+        self.session_filter = config.get("session_filter", {})
         self.symbol = config["symbol"]
         self.lot = config["lot_size"]
         self.magic = config["magic_number"]
@@ -67,6 +69,22 @@ class ScalpingStrategy:
 
     def _is_trend_down(self, df):
         return df.iloc[-1]["ema_fast"] < df.iloc[-1]["ema_slow"]
+
+    # ---- session filter ----
+
+    def _is_within_session(self):
+        sess = self.session_filter
+        if not sess.get("enabled", False):
+            return True
+        now = datetime.now(timezone.utc).time()
+        open_h, open_m = map(int, sess["open_utc"].split(":"))
+        close_h, close_m = map(int, sess["close_utc"].split(":"))
+        session_open = dtime(open_h, open_m)
+        session_close = dtime(close_h, close_m)
+        if session_open <= session_close:
+            return session_open <= now <= session_close
+        else:
+            return now >= session_open or now <= session_close
 
     # ---- signal builders ----
 
@@ -137,6 +155,11 @@ class ScalpingStrategy:
         if not trend_up and not trend_down:
             return None
         curr = df.iloc[-1]
+        # Only enter if price is positioned relative to EMA fast (avoid late entries)
+        if trend_up and curr["close"] <= curr["ema_fast"]:
+            return None
+        if trend_down and curr["close"] >= curr["ema_fast"]:
+            return None
         side = "buy" if trend_up else "sell"
         return self._build_signal(side, curr["close"], curr["atr"], curr.name)
 
@@ -203,6 +226,9 @@ class ScalpingStrategy:
         if spread > self.max_spread:
             return None
 
+        if not self._is_within_session():
+            return None
+
         if self.strategy_type == "EMA_CROSS":
             return self._sig_ema_cross(df)
         elif self.strategy_type == "MOMENTUM":
@@ -227,6 +253,8 @@ class ScalpingStrategy:
         spread = curr.get("spread", 0)
         if spread > self.max_spread:
             return None
+        if not self._is_within_session():
+            return None
         if self.strategy_type == "ADAPTIVE":
             regime = self._detect_regime(df)
             if regime != "trending":
@@ -241,9 +269,9 @@ class ScalpingStrategy:
                 sig["regime"] = "trending"
                 return sig
             return None
-        if self._is_trend_up(df):
+        if self._is_trend_up(df) and curr["close"] > curr["ema_fast"]:
             return self._build_signal("buy", curr["close"], curr["atr"], curr.name)
-        if self._is_trend_down(df):
+        if self._is_trend_down(df) and curr["close"] < curr["ema_fast"]:
             return self._build_signal("sell", curr["close"], curr["atr"], curr.name)
         return None
 
