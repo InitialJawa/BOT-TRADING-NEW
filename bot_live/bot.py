@@ -22,6 +22,9 @@ class SymbolHandler:
         self.lot = cfg["lot_size"]
         self.magic = cfg["magic_number"]
         self.comment = cfg["comment"]
+        self.timeframe_str = cfg.get("timeframe", "M5")
+        self.timeframe_minutes = 1 if self.timeframe_str == "M1" else 5
+        self.strategy_type = cfg.get("strategy_type", "EMA_CROSS")
 
         full_config = {
             "symbol": self.name,
@@ -29,6 +32,8 @@ class SymbolHandler:
             "magic_number": self.magic,
             "comment": self.comment,
             "max_spread_points": cfg.get("max_spread_points", 300),
+            "timeframe": self.timeframe_str,
+            "strategy_type": self.strategy_type,
             "strategy": shared_strategy,
         }
         self.strategy = ScalpingStrategy(full_config)
@@ -257,17 +262,18 @@ class ScalpingBot:
         handler.state["last_date"] = today
 
     def _is_new_candle_allowed(self, handler):
+        tf = handler.timeframe_minutes
+        now = datetime.now()
+        candle = now.replace(minute=(now.minute // tf) * tf, second=0, microsecond=0)
+
         if self.mode == "candle":
-            now = datetime.now()
-            current = now.replace(minute=(now.minute // 5) * 5, second=0, microsecond=0)
-            if handler.state["last_candle_time"] is None or current > datetime.fromisoformat(str(handler.state["last_candle_time"])):
-                handler.state["last_candle_time"] = current.isoformat()
+            key = handler.state.get("last_candle_time")
+            if key is None or candle > datetime.fromisoformat(str(key)):
+                handler.state["last_candle_time"] = candle.isoformat()
                 handler.save_state()
                 return True
             return False
         else:
-            now = datetime.now()
-            candle = now.replace(minute=(now.minute // 5) * 5, second=0, microsecond=0)
             if handler.state.get("last_signal_candle") == candle.isoformat():
                 return False
             handler.state["last_signal_candle"] = candle.isoformat()
@@ -297,7 +303,14 @@ class ScalpingBot:
             handler.update_trailing(position)
             return
 
-        # Check for new signal
+        # TREND_RE: re-enter immediately when no position
+        if handler.strategy_type == "TREND_RE":
+            signal = handler.strategy.get_trend_signal()
+            if signal:
+                handler.place_order(signal)
+            return
+
+        # Other strategies: wait for new candle
         if not self._is_new_candle_allowed(handler):
             return
 
@@ -306,7 +319,7 @@ class ScalpingBot:
             handler.place_order(signal)
 
     def run(self):
-        names = ", ".join(h.name for h in self.handlers)
+        names = ", ".join(f"{h.name}({h.strategy_type}/{h.timeframe_str})" for h in self.handlers)
         logger.info("=" * 50)
         logger.info("BOT STARTING")
         logger.info(f"Symbols: {names}")

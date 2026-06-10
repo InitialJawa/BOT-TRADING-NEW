@@ -1,8 +1,13 @@
 """
-Strategy Engine — EMA 8/34 Cross + ATR SL/TP + Trailing
+Strategy Engine — Multi-Strategy: EMA_CROSS / MOMENTUM / PULLBACK / TREND_RE
+ATR-based SL/TP + trailing for all strategies
 """
 import pandas as pd
 import MetaTrader5 as mt5
+
+TF_MAP = {"M1": mt5.TIMEFRAME_M1, "M5": mt5.TIMEFRAME_M5}
+
+VALID_STRATEGIES = {"EMA_CROSS", "MOMENTUM", "PULLBACK", "TREND_RE"}
 
 
 class ScalpingStrategy:
@@ -14,11 +19,20 @@ class ScalpingStrategy:
         self.sl_atr_mult = s["sl_atr_mult"]
         self.tp_atr_mult = s["tp_atr_mult"]
         self.trail_activation = s["trailing_activation"]
+        self.mom_threshold = s.get("momentum_threshold", 0.0005)
+
         self.max_spread = config["max_spread_points"]
         self.symbol = config["symbol"]
         self.lot = config["lot_size"]
         self.magic = config["magic_number"]
         self.comment = config["comment"]
+        self.timeframe_str = config.get("timeframe", "M5")
+        self.timeframe = TF_MAP.get(self.timeframe_str, mt5.TIMEFRAME_M5)
+        self.strategy_type = config.get("strategy_type", "EMA_CROSS")
+        if self.strategy_type not in VALID_STRATEGIES:
+            raise ValueError(f"Unknown strategy: {self.strategy_type}")
+
+    # ---- indicators ----
 
     def calculate_indicators(self, rates):
         df = pd.DataFrame(rates)
@@ -32,50 +46,144 @@ class ScalpingStrategy:
         df["atr"] = tr.ewm(span=self.atr_period, adjust=False).mean()
         return df
 
-    def get_signal(self):
-        rates = mt5.copy_rates_from_pos(self.symbol, mt5.TIMEFRAME_M5, 0, 100)
-        if rates is None or len(rates) < self.ema_slow + 5:
-            return None
-
-        df = self.calculate_indicators(rates)
+    def _get_trend_dir(self, df):
         if len(df) < 2:
             return None
-
         prev = df.iloc[-2]
         curr = df.iloc[-1]
+        if prev["ema_fast"] <= prev["ema_slow"] and curr["ema_fast"] > curr["ema_slow"]:
+            return "up"
+        if prev["ema_fast"] >= prev["ema_slow"] and curr["ema_fast"] < curr["ema_slow"]:
+            return "down"
+        if curr["ema_fast"] > curr["ema_slow"]:
+            return "up"
+        if curr["ema_fast"] < curr["ema_slow"]:
+            return "down"
+        return None
 
-        spread = curr.get("spread", 0)
-        if spread > self.max_spread:
-            return None
+    def _is_trend_up(self, df):
+        return df.iloc[-1]["ema_fast"] > df.iloc[-1]["ema_slow"]
 
-        bull = prev["ema_fast"] <= prev["ema_slow"] and curr["ema_fast"] > curr["ema_slow"]
-        bear = prev["ema_fast"] >= prev["ema_slow"] and curr["ema_fast"] < curr["ema_slow"]
+    def _is_trend_down(self, df):
+        return df.iloc[-1]["ema_fast"] < df.iloc[-1]["ema_slow"]
 
-        if not (bull or bear):
-            return None
+    # ---- signal builders ----
 
-        side = "buy" if bull else "sell"
-        price = curr["close"]
-        atr = curr["atr"]
-
+    def _build_signal(self, side, price, atr, timestamp):
         if side == "buy":
             sl = round(price - atr * self.sl_atr_mult, 2)
             tp = round(price + atr * self.tp_atr_mult, 2)
         else:
             sl = round(price + atr * self.sl_atr_mult, 2)
             tp = round(price - atr * self.tp_atr_mult, 2)
-
         return {
             "side": side,
             "price": price,
             "sl": sl,
             "tp": tp,
             "atr": round(atr, 2),
-            "time": curr.name,
+            "time": timestamp,
         }
 
+    def _sig_ema_cross(self, df):
+        if len(df) < 3:
+            return None
+        prev = df.iloc[-2]
+        curr = df.iloc[-1]
+        bull = prev["ema_fast"] <= prev["ema_slow"] and curr["ema_fast"] > curr["ema_slow"]
+        bear = prev["ema_fast"] >= prev["ema_slow"] and curr["ema_fast"] < curr["ema_slow"]
+        if not (bull or bear):
+            return None
+        side = "buy" if bull else "sell"
+        return self._build_signal(side, curr["close"], curr["atr"], curr.name)
+
+    def _sig_momentum(self, df):
+        if len(df) < 4:
+            return None
+        trend_up = self._is_trend_up(df)
+        trend_down = self._is_trend_down(df)
+        if not trend_up and not trend_down:
+            return None
+        curr = df.iloc[-1]
+        prev3 = df.iloc[-4]
+        mom = curr["close"] / prev3["close"] - 1
+        if trend_up and mom > self.mom_threshold:
+            return self._build_signal("buy", curr["close"], curr["atr"], curr.name)
+        if trend_down and mom < -self.mom_threshold:
+            return self._build_signal("sell", curr["close"], curr["atr"], curr.name)
+        return None
+
+    def _sig_pullback(self, df):
+        if len(df) < 3:
+            return None
+        trend_up = self._is_trend_up(df)
+        trend_down = self._is_trend_down(df)
+        if not trend_up and not trend_down:
+            return None
+        curr = df.iloc[-1]
+        prev = df.iloc[-2]
+        if trend_up and curr["low"] <= prev["ema_fast"]:
+            return self._build_signal("buy", curr["close"], curr["atr"], curr.name)
+        if trend_down and curr["high"] >= prev["ema_fast"]:
+            return self._build_signal("sell", curr["close"], curr["atr"], curr.name)
+        return None
+
+    def _sig_trend_re(self, df):
+        if len(df) < 3:
+            return None
+        trend_up = self._is_trend_up(df)
+        trend_down = self._is_trend_down(df)
+        if not trend_up and not trend_down:
+            return None
+        curr = df.iloc[-1]
+        side = "buy" if trend_up else "sell"
+        return self._build_signal(side, curr["close"], curr["atr"], curr.name)
+
+    # ---- public API ----
+
+    def get_signal(self):
+        rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 100)
+        if rates is None or len(rates) < self.ema_slow + 5:
+            return None
+        df = self.calculate_indicators(rates)
+        if len(df) < 2:
+            return None
+        curr = df.iloc[-1]
+
+        spread = curr.get("spread", 0)
+        if spread > self.max_spread:
+            return None
+
+        if self.strategy_type == "EMA_CROSS":
+            return self._sig_ema_cross(df)
+        elif self.strategy_type == "MOMENTUM":
+            return self._sig_momentum(df)
+        elif self.strategy_type == "PULLBACK":
+            return self._sig_pullback(df)
+        elif self.strategy_type == "TREND_RE":
+            return self._sig_trend_re(df)
+        return None
+
+    def get_trend_signal(self):
+        """Quick trend-direction entry (for TREND_RE between candles)."""
+        rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 10)
+        if rates is None or len(rates) < 5:
+            return None
+        df = self.calculate_indicators(rates)
+        if len(df) < 2:
+            return None
+        curr = df.iloc[-1]
+        spread = curr.get("spread", 0)
+        if spread > self.max_spread:
+            return None
+        if self._is_trend_up(df):
+            return self._build_signal("buy", curr["close"], curr["atr"], curr.name)
+        if self._is_trend_down(df):
+            return self._build_signal("sell", curr["close"], curr["atr"], curr.name)
+        return None
+
     def update_trailing_stop(self, position):
-        rates = mt5.copy_rates_from_pos(self.symbol, mt5.TIMEFRAME_M5, 0, 3)
+        rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 3)
         if rates is None:
             return None
         current_price = rates[-1][2]
@@ -102,7 +210,7 @@ class ScalpingStrategy:
         return None
 
     def _get_current_atr(self):
-        rates = mt5.copy_rates_from_pos(self.symbol, mt5.TIMEFRAME_M5, 0, 50)
+        rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 50)
         if rates is None or len(rates) < self.atr_period + 5:
             return None
         df = self.calculate_indicators(rates)
