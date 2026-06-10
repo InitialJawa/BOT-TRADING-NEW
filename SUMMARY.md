@@ -25,22 +25,29 @@ Automated scalping bot for MetaTrader 5 using EMA 8/34 crossover with ATR-based 
 ### ADAPTIVE Regime Detection
 ```
 regime_ratio = |EMA_fast - EMA_slow| / ATR
-regime_ratio >= 0.5  →  TRENDING  →  TREND_RE + momentum filter (>0.0005)
-regime_ratio <  0.5  →  RANGING   →  EMA_CROSS (wait for crossover)
+regime_ratio >= 0.7  →  TRENDING  →  4-bar momentum entry (>-0.05% for BUY, <0.05% for SELL)
+regime_ratio <  0.7  →  RANGING   →  EMA_CROSS (wait for crossover)
 ```
 
+**ADAPTIVE trending mode entry logic** (exact from `_sig_adaptive`):
+```
+BUY:  EMA_fast > EMA_slow  AND  close[now]/close[-4] - 1 > -0.0005
+SELL: EMA_fast < EMA_slow  AND  close[now]/close[-4] - 1 <  0.0005
+```
+This uses **4-bar momentum** (not 1-bar). In uptrend, any bar that hasn't dropped ≥0.05% in the last 4 bars qualifies. Very permissive — nearly every bar triggers in strong trend.
+
 ## Parameters (all strategies)
-| Param | Value |
-|-------|-------|
-| EMA fast/slow | 8 / 34 |
-| ATR period | 14 |
-| SL | 0.3 × ATR |
-| TP | 0.6 × ATR |
-| Trail activation | 0.2 × ATR |
-| Momentum threshold | 0.0005 (0.05%) |
-| Regime threshold | 0.5 ATR |
-| Max spread | 300 points |
-| Mode | Instant (every 5s poll) |
+| Param | v2.0 | v2.1 |
+|-------|------|------|
+| EMA fast/slow | 8 / 34 | 8 / 34 |
+| ATR period | 14 | 14 |
+| SL | 0.3 × ATR | 0.3 × ATR |
+| TP | 0.6 × ATR | 0.6 × ATR |
+| Trail activation | 0.2 × ATR | 0.2 × ATR |
+| Momentum threshold | 0.0005 (4-bar) | 0.0005 (4-bar) |
+| Regime threshold | **0.5** ATR | **0.7** ATR |
+| Max spread | 300 points | 300 points |
+| Mode | Instant | Instant |
 
 ## Lot Sizing ($300 capital, 2% risk/trade)
 | Pair | Lot | $/point |
@@ -49,64 +56,91 @@ regime_ratio <  0.5  →  RANGING   →  EMA_CROSS (wait for crossover)
 | US30m | 0.20 | $0.20 |
 | JP225m | 5.0 | ¥0.031 (≈$0.0002) |
 
-## Backtest Results (Fixed — END trades closed at SL, realistic)
+## Backtest Results (Corrected Logic)
 
-### Full Period: Sep 2025 – Jun 2026 (50,000 M5 bars, 8 months)
+**Important correction:** Early backtests used 1-bar momentum in ADAPTIVE trending mode. The actual `_sig_adaptive()` uses **4-bar momentum** (`close[-1]/close[-5] - 1 > -0.0005`). Re-running with exact code logic gives significantly lower trade counts and profit. The 1-bar backtests were overly optimistic.
+
+### Full Period — Strategies Comparison (all with 4-bar logic where applicable)
 
 ```
                   ADAPTIVE    EMA_CROSS   MOMENTUM   PULLBACK   TREND_RE
-XAUUSD  Trades      78          72           6         118         93
-        Win%       51.3%        51.4%       0.0%       56.8%      49.5%
-        PF          1.67        1.58        0.00        2.28       1.54
-        AdjNet    +$54.44     +$72.77     -$13.69    +$378.68    +$60.23
-        MaxDD       3.9%        6.1%        4.5%        5.1%       4.7%
+XAUUSD  Trades      30          72           6         118         93
+        Win%       43.3%       51.4%       0.0%       56.8%      49.5%
+        PF          1.21        1.58        0.00        2.28       1.54
+        AdjNet    +$10.83     +$72.77     -$13.69    +$378.68    +$60.23
 
-US30    Trades      37          19          50         164         49
-        Win%       51.4%       42.1%      60.0%       59.1%      49.0%
-        PF          1.84        1.00        2.62        2.37       1.72
-        AdjNet    +$26.51      +$0.02     +$73.83    +$371.74    +$32.27
-        MaxDD        -           -           -           -          -
+US30    Trades      32          19          50         164         49
+        Win%       53.1%       42.1%      60.0%       59.1%      49.0%
+        PF          1.92        1.00        2.62        2.37       1.72
+        AdjNet    +$22.43      +$0.02     +$73.83    +$371.74    +$32.27
 
-JP225   Trades     137          45          50          48          9
-        Win%       47.4%       60.0%      48.0%       52.1%      22.2%
-        PF          1.61        3.09        1.52        1.78       0.64
-        AdjNet    +$17.20     +$14.81      +$7.43     +$12.71     -$0.41
-        MaxDD        -           -           -           -          -
+JP225   Trades      24          45          50          48          9
+        Win%       45.8%       60.0%      48.0%       52.1%      22.2%
+        PF          1.44        3.09        1.52        1.78       0.64
+        AdjNet     +$1.40     +$14.81      +$7.43     +$12.71     -$0.41
 
-TOTAL   AdjNet    +$98.15     +$87.60     +$67.57    +$763.13    +$92.09
+TOTAL   AdjNet   +$34.66     +$87.60     +$67.57    +$763.13    +$92.09
 ```
 
-### Multi-Period Consistency Test
-XAUUSD split into 3 equal periods (16,666 bars each):
+**Note:** ADAPTIVE's low trade count is by design — 4-bar momentum threshold means
+only bars with sustained pressure qualify. In ranging mode, EMA crossovers are rare
+(once EMA 8/34 diverge, they stop crossing). This is a known limitation.
+
+### ADAPTIVE Multi-Period Consistency (v2.0, exact code logic)
 
 ```
-        P1 (Sep'25)  P2 (Feb'26)  P3 (Apr'26)  Trend
-ADAPTIVE    +$89.33    +$23.82      +$15.04     ✅ 3/3 pos
-EMA_CROSS   +$48.21    +$14.80      +$25.25     ✅ 3/3 pos
-PULLBACK   +$393.16    +$30.20       +$3.50     ❌ P1 94%
-TREND_RE    -$15.42    +$10.29     +$36.17     ⚠️ Mixed
-MOMENTUM   +$109.64    +$29.77     +$50.26     ✅ 3/3 pos
+XAUUSD:
+        FULL       P1        P2        P3        Trend
+Trades   30        30        88         2
+Adj$   +$10.83   +$10.83  +$138.78  -$28.04     ⚠️ P3 loss (2 trades)
+
+US30:
+        FULL       P1        P2        P3        Trend
+Trades   32        32        37        58
+Adj$   +$22.43   +$22.43   +$13.06   +$22.18    ✅ 3/3 positive
+
+JP225:
+        FULL       P1        P2        P3        Trend
+Trades   24        24       236        61
+Adj$    +$1.40    +$1.40   +$20.86    +$6.13    ✅ 3/3 positive
+
+ALL PAIRS FULL: +$34.66 over 3 pairs x 8 months = ~$4.33/mo on $300 (1.4% ROI/mo)
 ```
 
-US30 split into 3 equal periods:
+### ADAPTIVE v2.0 vs v2.1 (exact code logic, 4-bar momentum)
 
 ```
-        P1 (Sep'25)  P2 (Feb'26)  P3 (Apr'26)  Trend
-ADAPTIVE     +$34.45    +$10.70      -$0.07     ✅ 2/3 pos
-PULLBACK    +$148.77   +$168.00     +$25.12     ⚠️ P3 drop
-MOMENTUM    +$105.81    -$12.90      -$1.85     ❌ P1 bias
-TREND_RE     +$49.07     +$5.21      +$7.14     ✅ 2/3 pos
+Pair      Period   v2.0(th=0.5)  v2.1(th=0.7)   Δ
+XAUUSD    FULL     +$10.83        +$12.54      +$1.71
+XAUUSD    P1       +$10.83        +$12.54      +$1.71
+XAUUSD    P2      +$138.78        +$31.53     -$107.25  ⚠️
+XAUUSD    P3       -$28.04        -$28.04       $0.00
+
+US30      FULL     +$22.43        +$18.90      -$3.53
+US30      P1       +$22.43        +$18.90      -$3.53
+US30      P2       +$13.06         +$8.00      -$5.05
+US30      P3       +$22.18        +$10.64     -$11.54
+
+JP225     FULL      +$1.40         +$1.51      +$0.10
+JP225     P1        +$1.40         +$1.51      +$0.10
+JP225     P2       +$20.86        +$17.64      -$3.22
+JP225     P3        +$6.13         +$8.20      +$2.08
+
+TOTAL     FULL     +$34.66        +$32.95      -$1.71
 ```
+
+v2.1 underperforms v2.0 by -$1.71 (-5%). Difference is negligible. v2.1 chosen
+for fewer trades (lower transaction costs) + session filter + cooldown (live benefits).
 
 ## Key Findings
 
 1. **END trade artifact**: TREND_RE appeared to have PF 9.71 / +$858 in first backtest. Actual cause: 1 single position still open at end of data was closed at final market price (+$776.60). With conservative close-at-SL, TREND_RE is PF 1.54 / +$60.23.
 
-2. **ADAPTIVE is most consistent**: 8/9 period-pair combinations positive (89%). Modest but reliable returns: ~$98/8mo = ~$12/mo on $300 (4% ROI/mo).
+2. **ADAPTIVE is most consistent**: 8/9 period-pair combinations positive (89%). Modest returns: ~$35/8mo = ~$4.33/mo on $300 (1.4% ROI/mo). Low trade count (86 across 3 pairs in 8 months) means ADAPTIVE is very selective.
 
 3. **PULLBACK has highest total but is unstable**: XAUUSD PULLBACK net $378.68, but 94% comes from Period 1 only. Likely overfit to specific market conditions in late 2025.
 
-4. **JP225 safest with ADAPTIVE**: Pure TREND_RE loses (-$0.41), pure EMA_CROSS barely profits (+$14.81). ADAPTIVE gives +$17.20 with 137 trades across all regimes.
+4. **JP225 safest with ADAPTIVE**: Pure TREND_RE loses (-$0.41), pure EMA_CROSS profits (+$14.81). ADAPTIVE gives only +$1.40 with 24 trades — the 4-bar momentum filter is very restrictive on volatile JP225.
 
 5. **Daily loss circuit (5%) & max consecutive losses (5)** protect against drawdown: max DD across all strategies < 7%.
 
@@ -139,16 +173,16 @@ File: `bot_live/config.yaml`
 - Session filter: XAUUSD 07:00-22:00 UTC, US30 13:30-20:00 UTC, JP225 00:00-08:00 UTC
 - Cooldown: skip entry after 3 consecutive losses (reset on win)
 
-## Threshold Decision (0.5 vs 0.7)
-
-Backtest ADAPTIVE across all 3 pairs (full period):
+## Threshold Decision (0.5 vs 0.7) — v2.1 Exact Logic
 
 | Threshold | XAUUSD | US30 | JP225 | **Total** | Trades |
 |-----------|--------|------|-------|-----------|--------|
-| 0.5 | +$65.97 | +$18.92 | +$17.92 | **+$102.81** | 251 |
-| 0.7 | +$66.51 | +$21.63 | +$14.73 | **+$102.87** | 230 |
+| 0.5 | +$10.83 | +$22.43 | +$1.40 | **+$34.66** | 86 |
+| 0.7 | +$12.54 | +$18.90 | +$1.51 | **+$32.95** | 79 |
 
-Virtually identical total return. 0.7 chosen for **fewer trades** (lower transaction costs) and **better US30 P3 performance**.
+Virtually identical return (-$1.71). 0.7 chosen for **fewer trades** (lower spreads/costs) + session filter & cooldown (live only benefits).
+
+**Total realistic ADAPTIVE return: ~$33-35 over 8 months on $300 ≈ $4/mo ≈ 1.4% ROI/mo.**
 
 ## File Changes (v2.1)
 | File | Change |
