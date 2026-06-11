@@ -20,12 +20,12 @@ PYTHON = "C:\\Python314\\python.exe"
 
 PAIR_CONFIG = {
     "XAUUSDm": {"ratio_usd": 30000,  "min_eq_usd": 0,    "min_lot": 0.01, "lot_step": 0.01},
-    "JP225m":  {"ratio_usd": 300,    "min_eq_usd": 0,    "min_lot": 1.0,  "lot_step": 1.0},
+    "JP225m":  {"ratio_usd": 500,    "min_eq_usd": 99999,  "min_lot": 1.0,  "lot_step": 1.0},
     "US30m":   {"ratio_usd": 30000,  "min_eq_usd": 3000, "min_lot": 0.01, "lot_step": 0.01},
 }
 
 BOT_CONFIGS = {
-    "bot_fabio": BASE / "bot_fabio" / "config.yaml",
+    "bot_fabio": BASE.parent / "bot_fabio" / "config.yaml",
 }
 
 
@@ -154,6 +154,11 @@ def run():
     state["last_equity_usd"] = round(usd_eq, 2)
     state["last_check"] = datetime.now().isoformat()
     STATE_FILE.write_text(json.dumps(state, indent=2))
+
+    subprocess.Popen(
+        [PYTHON, str(BASE / "update_status.py")],
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
     log("Done")
 
 

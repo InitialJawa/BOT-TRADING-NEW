@@ -10,11 +10,12 @@ print(f"Balance: ${info.balance:.2f} | Equity: ${info.equity:.2f} | Profit: ${in
 print(f"Margin: ${info.margin:.2f} | Free: ${info.margin_free:.2f}")
 print()
 
-for sym in ["XAUUSDm", "US30m"]:
+for sym in ["XAUUSDm", "US30m", "JP225m"]:
     pos = mt5.positions_get(symbol=sym)
     if pos and len(pos) > 0:
         p = pos[0]
-        print(f"{sym:12} {'OPEN':>4} {p.type_str:>4} Vol={p.volume:.2f} Entry={p.price_open:.2f} "
+        side = "BUY" if p.type == 0 else "SELL"
+        print(f"{sym:12} {'OPEN':>4} {side:>4} Vol={p.volume:.2f} Entry={p.price_open:.2f} "
               f"SL={p.sl:.2f} TP={p.tp:.2f} Price={p.price_current:.2f} "
               f"Profit={p.profit:.2f}")
     else:

@@ -30,8 +30,8 @@ THRESHOLDS = {
 }
 
 BOT_DIRS = {
-    "FABIO": BASE / "bot_fabio",
-    "HENDRO": BASE / "bot_hendro",
+    "FABIO": BASE.parent / "bot_fabio",
+    "HENDRO": BASE.parent / "bot_hendro",
 }
 
 

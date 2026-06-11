@@ -189,12 +189,21 @@ class ScalpingBot:
         account = self._get_account_info()
         if not account:
             return False
-        dd_pct = (account["balance"] - account["equity"]) / account["balance"] * 100
+        bal = account["balance"]
+        if bal <= 0:
+            return False
+        dd_pct = (bal - account["equity"]) / bal * 100
         if dd_pct > self.risk.get("circuit_breaker_dd_pct", 15):
             logger.error(f"Global circuit breaker! DD={dd_pct:.1f}%")
-            send_error(f"Circuit breaker! DD={dd_pct:.1f}%")
             return True
         return False
+
+    def _get_open_position_count(self):
+        total = 0
+        for h in self.handlers:
+            if h.get_position():
+                total += 1
+        return total
 
     def _check_closed_positions(self):
         yesterday = datetime.now() - timedelta(days=1)
@@ -303,6 +312,11 @@ class ScalpingBot:
         position = handler.get_position()
         if position:
             handler.update_trailing(position)
+            return
+
+        # Check max positions globally
+        max_pos = self.risk.get("max_positions", 3)
+        if self._get_open_position_count() >= max_pos:
             return
 
         # Wait for new candle
