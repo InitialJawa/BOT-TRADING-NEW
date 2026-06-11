@@ -21,7 +21,7 @@ symbols:
 
   - name: "JP225m"
     strategy_type: "TREND_RE"
-    lot_size: 5.0
+    lot_size: 47.0
     magic_number: 25062028
     comment: "SCALP_JP225"
     max_spread_points: 300

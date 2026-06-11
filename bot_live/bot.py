@@ -303,14 +303,7 @@ class ScalpingBot:
             handler.update_trailing(position)
             return
 
-        # TREND_RE: re-enter immediately when no position
-        if handler.strategy_type == "TREND_RE":
-            signal = handler.strategy.get_trend_signal()
-            if signal:
-                handler.place_order(signal)
-            return
-
-        # Other strategies: wait for new candle
+        # Wait for new candle
         if not self._is_new_candle_allowed(handler):
             return
 

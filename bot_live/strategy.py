@@ -142,7 +142,7 @@ class ScalpingStrategy:
     # ---- public API ----
 
     def get_signal(self):
-        rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 100)
+        rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 1, 100)
         if rates is None or len(rates) < self.ema_slow + 5:
             return None
         df = self.calculate_indicators(rates)
@@ -164,29 +164,14 @@ class ScalpingStrategy:
             return self._sig_trend_re(df)
         return None
 
-    def get_trend_signal(self):
-        """Quick trend-direction entry (for TREND_RE between candles)."""
-        rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 10)
-        if rates is None or len(rates) < 5:
-            return None
-        df = self.calculate_indicators(rates)
-        if len(df) < 2:
-            return None
-        curr = df.iloc[-1]
-        spread = curr.get("spread", 0)
-        if spread > self.max_spread:
-            return None
-        if self._is_trend_up(df):
-            return self._build_signal("buy", curr["close"], curr["atr"], curr.name)
-        if self._is_trend_down(df):
-            return self._build_signal("sell", curr["close"], curr["atr"], curr.name)
-        return None
-
     def update_trailing_stop(self, position):
-        rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 3)
-        if rates is None:
+        tick = mt5.symbol_info_tick(self.symbol)
+        if tick is None:
             return None
-        current_price = rates[-1][2]
+        current_price = tick.bid if position.type == mt5.ORDER_TYPE_BUY else tick.ask
+
+        si = mt5.symbol_info(self.symbol)
+        prec = len(str(si.trade_tick_size).split('.')[-1]) if '.' in str(si.trade_tick_size) else 0
 
         entry_price = position.price_open
         atr = self._get_current_atr()
@@ -200,17 +185,17 @@ class ScalpingStrategy:
             if profit > activation:
                 new_sl = current_price - activation
                 if new_sl > position.sl:
-                    return round(new_sl, 2)
+                    return round(new_sl, prec)
         elif position.type == mt5.ORDER_TYPE_SELL:
             profit = entry_price - current_price
             if profit > activation:
                 new_sl = current_price + activation
                 if new_sl < position.sl:
-                    return round(new_sl, 2)
+                    return round(new_sl, prec)
         return None
 
     def _get_current_atr(self):
-        rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 50)
+        rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 1, 50)
         if rates is None or len(rates) < self.atr_period + 5:
             return None
         df = self.calculate_indicators(rates)
